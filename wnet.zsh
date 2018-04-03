@@ -130,6 +130,11 @@ for ((i = 0; i < ${sleeptime}; i++)); do
 done
 echo
 
+if [ ${isup} != "associated" ]; then
+	echo "[-] Could not associate with network" 2>&1
+	exit 1
+fi
+
 dhclient ${wlan}
 res=${?}
 if [ ${res} -gt 0 ]; then
