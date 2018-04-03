@@ -5,20 +5,104 @@ device="iwm0"
 network=""
 wlan="wlan0"
 extraconfig=""
-sleeptime=5
+sleeptime=10
 
 scan=""
 randomize=0
-ether=""
+
+function device_exists() {
+
+	ifconfig ${wlan} > /dev/null 2>&1
+
+	return ${?}
+}
+
+function destroy_device() {
+	local res
+
+	ifconfig ${wlan} destroy
+	res=${?}
+	if [ ${res} -gt 0 ]; then
+		echo "[-] Could not destroy old ${wlan} interface" >&2
+		return 1
+	fi
+
+	return 0
+}
+
+function create_device() {
+	local res
+
+	ifconfig ${wlan} create wlandev ${device}
+	res=${?}
+	if [ ${res} -gt 0 ]; then
+		echo "[-] Could not create ${wlan} device backed by ${device}" >&2
+		return ${res}
+	fi
+
+	if [ ${randomize} -gt 0 ]; then
+		ifconfig ${wlan} ether random
+		res=${?}
+		if [ ${res} -gt 0 ]; then
+			echo "[-] Could not set random MAC address" >&2
+			return ${res}
+		fi
+	fi
+
+	return 0
+}
+
+function list_networks() {
+	local i
+	local res
+
+	if ! device_exists; then
+		create_device
+	fi
+
+	ifconfig ${wlan} up
+	res=${?}
+	if [ ${res} -gt 0 ]; then
+		echo "[-] Could not bring the interface up for scanning"
+		return 1
+	fi
+
+	echo "[*] Scanning for networks. Press ^C to stop."
+	i=0
+	while true; do
+		if [ ${i} -gt 0 ]; then
+			echo "==== ==== ==== ===="
+		fi
+		i=0
+		ifconfig -v ${wlan} list scan |
+		    awk -F 'SSID<' '{print $2;}' |
+		    awk -F '>' '{print $1;}' | while read network; do
+			if [ -z "${network}" ]; then
+				continue
+			fi
+			
+			echo "[${i}] ${network}"
+			i=$((${i}+1))
+		done
+
+		echo "[*] Sleeping for ${sleeptime} seconds before the next scan."
+		sleep ${sleeptime}
+	done
+
+	return 0
+}
 
 function main() {
-	while getopts "rc:d:n:s:w:" o; do
+	while getopts "lrc:d:n:s:w:" o; do
 		case "${o}" in
 			c)
 				config="${OPTARG}"
 				;;
 			d)
 				device="${OPTARG}"
+				;;
+			l)
+				list_networks || exit ${?}
 				;;
 			n)
 				network="${OPTARG}"
@@ -70,39 +154,13 @@ function main() {
 		extraconfig="${extraconfig}\nscan_ssid=1"
 	fi
 
-	#######################################
-	# If the interface exists, destroy it #
-	#######################################
-
-	ifconfig ${wlan} > /dev/null 2>&1
-	if [ ${?} -eq 0 ]; then
-		ifconfig ${wlan} destroy
-		res=${?}
-		if [ ${res} -gt 0 ]; then
-			echo "[-] Could not destroy old ${wlan} interface" >&2
-			exit 1
-		fi
-	fi
+	device_exists && destroy_device || exit 1
 
 	############################
 	# Create the new interface #
 	############################
 
-	ifconfig ${wlan} create wlandev ${device} ${ether}
-	res=${?}
-	if [ ${res} -gt 0 ]; then
-		echo "[-] Could not create ${wlan} device backed by ${device}" >&2
-		exit 1
-	fi
-
-	if [ ${randomize} -gt 0 ]; then
-		ifconfig ${wlan} ether random
-		res=${?}
-		if [ ${res} -gt 0 ]; then
-			echo "[-] Could not set random MAC address" >&2
-			exit 1
-		fi
-	fi
+	create_device || exit 1
 
 	cat <<EOF | wpa_supplicant -i ${wlan} -B -c /dev/stdin
 network={
