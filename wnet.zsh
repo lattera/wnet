@@ -151,10 +151,14 @@ function main() {
 
 	scan=$(uclcmd get -f ${config} --noquotes .${network}.scan)
 	if [ "${scan}" = "true" ]; then
-		extraconfig="${extraconfig}\nscan_ssid=1"
+		extraconfig=$(echo "${extraconfig}\nscan_ssid=1")
 	fi
 
-	device_exists && destroy_device || exit 1
+	if device_exists; then
+		if ! destroy_device; then
+			exit ${?}
+		fi
+	fi
 
 	############################
 	# Create the new interface #
